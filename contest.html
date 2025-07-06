@@ -1,0 +1,247 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MedForces - Contest</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script type="module" src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm"></script>
+</head>
+<body class="bg-gray-100 font-sans">
+  <!-- Header -->
+  <header class="bg-blue-500 text-white py-4 shadow-md">
+    <div class="container mx-auto px-4 flex justify-between items-center">
+      <h1 class="text-3xl font-bold">MedForces</h1>
+      <div class="flex items-center space-x-4">
+        <button id="menu-toggle" class="text-2xl">☰</button>
+        <a id="logout-link" href="#" class="hover:underline">Logout</a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Sidebar -->
+  <div id="sidebar" class="fixed top-0 left-0 h-full w-[200px] bg-blue-600 text-white transform -translate-x-full transition-transform duration-300">
+    <div class="p-4">
+      <h2 class="text-xl font-bold mb-4">Menu</h2>
+      <ul>
+        <li><a href="profile.html" class="block py-2 hover:bg-blue-700">Profile</a></li>
+        <li><a href="contest.html" class="block py-2 hover:bg-blue-700">Contests</a></li>
+        <li><a href="manage_contests.html" class="block py-2 hover:bg-blue-700">Manage Contests</a></li>
+      </ul>
+    </div>
+  </div>
+  <div id="overlay" class="fixed inset-0 bg-black bg-opacity-50 hidden"></div>
+
+  <!-- Contest Section -->
+  <section class="bg-white py-12">
+    <div class="container mx-auto px-4">
+      <h2 id="contest-title" class="text-3xl font-bold text-gray-800 text-center mb-8">Contest</h2>
+      <div id="contest-timer" class="text-center text-xl font-semibold text-red-600 mb-8"></div>
+      <div id="contest-status" class="text-center text-lg text-gray-600 mb-8"></div>
+      <div id="problems-list" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"></div>
+      <div id="problem-details" class="mt-8 hidden">
+        <h3 id="problem-title" class="text-2xl font-bold text-gray-800 mb-4"></h3>
+        <p id="problem-description" class="text-gray-600 mb-4"></p>
+        <p id="problem-points" class="text-gray-600 mb-4"></p>
+        <textarea id="solution-input" class="border border-gray-300 rounded-lg p-2 w-full h-40 mb-4" placeholder="Enter your solution here..."></textarea>
+        <button id="submit-solution" class="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 transition">Submit Solution</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="bg-blue-500 text-white py-4">
+    <div class="container mx-auto px-4 text-center">
+      <p>© 2025 MedForces. All rights reserved.</p>
+    </div>
+  </footer>
+
+  <!-- JavaScript -->
+  <script type="module">
+    import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+
+    const supabase = createClient('https://rolqigegxqxuxfgvcvnm.supabase.co', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJvbHFpZ2VneHF4dXhmZ3Zjdm5tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTE3MzY2MDgsImV4cCI6MjA2NzMxMjYwOH0.9SI83UnlBu-HVT2u77uYkAS2xyqsMff3tkmzzMf20Ww');
+
+    // Sidebar toggle
+    const menuToggle = document.getElementById('menu-toggle');
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('overlay');
+    menuToggle.addEventListener('click', () => {
+      sidebar.classList.toggle('-translate-x-full');
+      overlay.classList.toggle('hidden');
+    });
+    overlay.addEventListener('click', () => {
+      sidebar.classList.add('-translate-x-full');
+      overlay.classList.add('hidden');
+    });
+
+    // Logout
+    document.getElementById('logout-link').addEventListener('click', async () => {
+      await supabase.auth.signOut();
+      window.location.href = 'login.html';
+    });
+
+    // Get contest ID from URL (e.g., contest.html?id=uuid)
+    const urlParams = new URLSearchParams(window.location.search);
+    const contestId = urlParams.get('id');
+
+    if (!contestId) {
+      document.getElementById('contest-status').textContent = 'No contest selected.';
+      return;
+    }
+
+    // Check contest status and load problems
+    async function loadContest() {
+      const { data: contest, error } = await supabase
+        .from('contests')
+        .select('*')
+        .eq('id', contestId)
+        .single();
+
+      if (error || !contest) {
+        document.getElementById('contest-status').textContent = 'Contest not found.';
+        return;
+      }
+
+      document.getElementById('contest-title').textContent = contest.title;
+      const now = new Date();
+      const startTime = new Date(contest.start_time);
+      const endTime = new Date(contest.end_time);
+
+      if (now < startTime) {
+        document.getElementById('contest-status').textContent = `Contest starts at ${startTime.toLocaleString()}`;
+        return;
+      } else if (now > endTime) {
+        document.getElementById('contest-status').textContent = 'Contest has ended.';
+        return;
+      }
+
+      // Update timer
+      const timer = document.getElementById('contest-timer');
+      function updateTimer() {
+        const now = new Date();
+        const timeLeft = endTime - now;
+        if (timeLeft <= 0) {
+          timer.textContent = 'Contest has ended.';
+          document.getElementById('contest-status').textContent = 'Contest has ended.';
+          return;
+        }
+        const hours = Math.floor(timeLeft / (1000 * 60 * 60));
+        const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
+        const seconds = Math.floor((timeLeft % (1000 * 60)) / 1000);
+        timer.textContent = `Time Left: ${hours}h ${minutes}m ${seconds}s`;
+        setTimeout(updateTimer, 1000);
+      }
+      updateTimer();
+
+      // Load problems
+      const { data: problems, error: problemsError } = await supabase
+        .from('problems')
+        .select('*')
+        .eq('contest_id', contestId);
+
+      if (problemsError || !problems) {
+        document.getElementById('contest-status').textContent = 'Error loading problems.';
+        return;
+      }
+
+      const problemsList = document.getElementById('problems-list');
+      problems.forEach(problem => {
+        const div = document.createElement('div');
+        div.className = 'bg-blue-50 p-4 rounded-lg shadow-md cursor-pointer';
+        div.innerHTML = `
+          <h3 class="text-xl font-semibold text-gray-800">${problem.title}</h3>
+          <p class="text-gray-600">Points: ${problem.points}</p>
+        `;
+        div.addEventListener('click', () => showProblemDetails(problem));
+        problemsList.appendChild(div);
+      });
+    }
+
+    // Show problem details
+    function showProblemDetails(problem) {
+      document.getElementById('problem-details').classList.remove('hidden');
+      document.getElementById('problem-title').textContent = problem.title;
+      document.getElementById('problem-description').textContent = problem.description;
+      document.getElementById('problem-points').textContent = `Points: ${problem.points}`;
+      document.getElementById('submit-solution').dataset.problemId = problem.id;
+    }
+
+    // Submit solution
+    document.getElementById('submit-solution').addEventListener('click', async () => {
+      const problemId = document.getElementById('submit-solution').dataset.problemId;
+      const solution = document.getElementById('solution-input').value.trim();
+      if (!solution) {
+        alert('Please enter a solution.');
+        return;
+      }
+
+      const { data: user } = await supabase.auth.getUser();
+      if (!user) {
+        alert('You must be logged in to submit a solution.');
+        return;
+      }
+
+      const { error } = await supabase
+        .from('submissions')
+        .insert({
+          user_id: user.user.id,
+          problem_id: problemId,
+          contest_id: contestId,
+          solution,
+        });
+
+      if (error) {
+        console.error('Error submitting solution:', error.message);
+        alert('Failed to submit solution: ' + error.message);
+        return;
+      }
+
+      alert('Solution submitted successfully!');
+      document.getElementById('solution-input').value = '';
+    });
+
+    // Load contest on page load
+    loadContest();
+  </script>
+</body>
+</html>
